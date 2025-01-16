@@ -1,0 +1,55 @@
+# Grafana datasources configuration v1
+# Optimized for Prompts Portal platform monitoring
+# Version: 1.0.0
+# SLA Target: 99.9%
+
+apiVersion: 1
+
+# Datasources configuration with high-performance settings
+# and comprehensive monitoring capabilities
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      # Optimized scraping interval for real-time metrics
+      timeInterval: "15s"
+      # Extended query timeout for complex aggregations
+      queryTimeout: "60s"
+      # Preferred method for data retrieval
+      httpMethod: POST
+      # Trace correlation configuration
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: jaeger
+      # Prometheus-specific configurations
+      prometheusType: Prometheus
+      prometheusVersion: 2.45.0
+      # Performance optimization settings
+      cacheLevel: High
+      disableMetricsLookup: false
+      incrementalQuerying: true
+      # Data retention configuration aligned with Prometheus
+      retentionPeriod: "30d"
+    # Security settings - no sensitive data exposed
+    secureJsonData: {}
+    # Version tags for tracking
+    version: 1
+    # Health check settings
+    jsonDataAnyOf:
+      - healthCheckQuery: "up"
+      - healthCheckQueryWindow: "5m"
+    # Connection settings
+    withCredentials: false
+    tlsAuth: false
+    tlsAuthWithCACert: false
+    # Basic auth disabled - using proxy access
+    basicAuth: false
+    basicAuthUser: ""
+    # Database connection limits
+    maxOpenConns: 100
+    maxIdleConns: 100
+    connMaxLifetime: 14400
