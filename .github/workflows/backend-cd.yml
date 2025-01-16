@@ -1,0 +1,192 @@
+name: Backend CD
+
+on:
+  workflow_run:
+    workflows: ["Backend CI"]
+    types: [completed]
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOCKER_REGISTRY: prompts-portal.azurecr.io
+  DOCKER_IMAGE: backend
+  KUBE_NAMESPACE: prompts-portal
+  WORKING_DIRECTORY: src/backend
+  HEALTH_CHECK_TIMEOUT: "300"
+  CANARY_INCREMENT: "20"
+  METRIC_WINDOW: "600"
+
+jobs:
+  build_push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Azure login with OIDC
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          
+      - name: ACR login
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ env.DOCKER_REGISTRY }}
+          
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.WORKING_DIRECTORY }}
+          push: true
+          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_VERSION=20
+            BUILD_VERSION=${{ github.sha }}
+          provenance: true
+          sbom: true
+
+  deploy_staging:
+    needs: build_push
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    permissions:
+      id-token: write
+      deployments: write
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          
+      - name: Set AKS context
+        uses: azure/aks-set-context@v1
+        with:
+          resource-group: prompts-portal-staging
+          cluster-name: prompts-portal-staging-aks
+          
+      - name: Deploy blue environment
+        run: |
+          kubectl create namespace ${{ env.KUBE_NAMESPACE }}-blue --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Update deployment manifest with new image
+          sed -i "s|image:.*|image: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }}|" \
+            infrastructure/kubernetes/backend/deployment.yaml
+            
+          kubectl apply -f infrastructure/kubernetes/backend/deployment.yaml \
+            -n ${{ env.KUBE_NAMESPACE }}-blue
+            
+      - name: Health check
+        run: |
+          timeout ${{ env.HEALTH_CHECK_TIMEOUT }} bash -c \
+            'until kubectl rollout status deployment/backend -n ${{ env.KUBE_NAMESPACE }}-blue; do sleep 5; done'
+            
+      - name: Switch traffic
+        if: success()
+        run: |
+          kubectl patch service backend \
+            -n ${{ env.KUBE_NAMESPACE }} \
+            --patch '{"spec":{"selector":{"environment":"blue"}}}'
+            
+      - name: Cleanup green environment
+        if: success()
+        run: |
+          kubectl delete namespace ${{ env.KUBE_NAMESPACE }}-green --ignore-not-found
+
+  deploy_production:
+    needs: deploy_staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    permissions:
+      id-token: write
+      deployments: write
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          
+      - name: Set AKS context
+        uses: azure/aks-set-context@v1
+        with:
+          resource-group: prompts-portal-prod
+          cluster-name: prompts-portal-prod-aks
+          
+      - name: Deploy canary
+        run: |
+          # Update deployment manifest with new image
+          sed -i "s|image:.*|image: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }}|" \
+            infrastructure/kubernetes/backend/deployment.yaml
+            
+          # Deploy canary with initial traffic weight
+          kubectl apply -f infrastructure/kubernetes/backend/deployment.yaml \
+            -n ${{ env.KUBE_NAMESPACE }} \
+            -l version=canary
+            
+      - name: Canary analysis
+        run: |
+          for i in $(seq ${{ env.CANARY_INCREMENT }} 100 ${{ env.CANARY_INCREMENT }}); do
+            echo "Analyzing canary metrics for ${{ env.METRIC_WINDOW }} seconds..."
+            sleep ${{ env.METRIC_WINDOW }}
+            
+            # Check error rate
+            ERROR_RATE=$(kubectl exec -n monitoring prometheus-0 -c prometheus -- \
+              wget -qO- "http://localhost:9090/api/v1/query" --post-data \
+              "query=rate(http_requests_total{status=~'5..'}[5m])/rate(http_requests_total[5m])*100" \
+              | jq '.data.result[0].value[1]')
+              
+            if (( $(echo "$ERROR_RATE > 0.1" | bc -l) )); then
+              echo "Error rate too high: $ERROR_RATE%"
+              exit 1
+            fi
+            
+            # Increase traffic weight
+            kubectl patch service backend \
+              -n ${{ env.KUBE_NAMESPACE }} \
+              --patch "{\"spec\":{\"trafficPolicy\":{\"weightedPods\":{\"canary\":$i}}}}"
+          done
+          
+      - name: Promote canary
+        if: success()
+        run: |
+          kubectl apply -f infrastructure/kubernetes/backend/deployment.yaml \
+            -n ${{ env.KUBE_NAMESPACE }} \
+            -l version=stable
+            
+      - name: Notify deployment status
+        if: always()
+        run: |
+          curl -X POST ${{ secrets.ALERT_WEBHOOK }} \
+            -H 'Content-Type: application/json' \
+            -d "{\"deployment\":\"backend\",\"status\":\"${{ job.status }}\",\"sha\":\"${{ github.sha }}\"}"
