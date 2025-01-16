@@ -1,0 +1,91 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api-gateway-monitor
+  namespace: monitoring
+  labels:
+    app: prompts-portal
+    component: api-gateway
+spec:
+  selector:
+    matchLabels:
+      app: api-gateway
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+      relabelings:
+        - sourceLabels: ["__meta_kubernetes_pod_name"]
+          targetLabel: pod
+          action: replace
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: prompt-service-monitor
+  namespace: monitoring
+  labels:
+    app: prompts-portal
+    component: prompt-service
+spec:
+  selector:
+    matchLabels:
+      app: prompt-service
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+      metricRelabelings:
+        - sourceLabels: ["__name__"]
+          regex: "prompt_.*"
+          action: keep
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: analytics-service-monitor
+  namespace: monitoring
+  labels:
+    app: prompts-portal
+    component: analytics-service
+spec:
+  selector:
+    matchLabels:
+      app: analytics-service
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+      metricRelabelings:
+        - sourceLabels: ["__name__"]
+          regex: "analytics_.*"
+          action: keep
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: collaboration-service-monitor
+  namespace: monitoring
+  labels:
+    app: prompts-portal
+    component: collaboration-service
+spec:
+  selector:
+    matchLabels:
+      app: collaboration-service
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+      metricRelabelings:
+        - sourceLabels: ["__name__"]
+          regex: "collab_.*"
+          action: keep
