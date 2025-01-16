@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+  namespace: prompts-portal
+  labels:
+    app: prompts-portal
+    component: web
+    environment: ${ENV}
+    managed-by: kubectl
+    version: ${VERSION}
+data:
+  # API Configuration
+  VITE_API_BASE_URL: http://${API_SERVICE_HOST}:${API_SERVICE_PORT}/api
+  VITE_API_VERSION: v1
+  VITE_API_TIMEOUT: "30000"
+  VITE_API_RETRY_ATTEMPTS: "3"
+  VITE_API_RETRY_DELAY: "1000"
+
+  # Feature Flags
+  VITE_ENABLE_ANALYTICS: "true"
+  VITE_ENABLE_REAL_TIME_COLLABORATION: "true"
+  VITE_ENABLE_PROMPT_OPTIMIZATION: "true"
+  VITE_ENABLE_VERSION_HISTORY: "true"
+  VITE_ENABLE_TEMPLATE_LIBRARY: "true"
+  VITE_ENABLE_AI_SUGGESTIONS: "true"
+
+  # Localization Settings
+  VITE_DEFAULT_LOCALE: en-US
+  VITE_SUPPORTED_LOCALES: en-US,es-ES,fr-FR,de-DE
+  VITE_DEFAULT_TIMEZONE: UTC
+
+  # Performance Targets
+  VITE_TARGET_RESPONSE_TIME: "2000"
+  VITE_TARGET_UPTIME: "99.9"
+  VITE_MAX_PROMPT_LENGTH: "4000"
+  VITE_MAX_TEMPLATE_VARIABLES: "20"
+
+  # Real-time Collaboration
+  VITE_COLLABORATION_SYNC_INTERVAL: "5000"
+
+  # Analytics Configuration
+  VITE_ANALYTICS_BATCH_SIZE: "10"
+  VITE_ANALYTICS_FLUSH_INTERVAL: "30000"
+
+  # Web Application Settings
+  VITE_APP_REGION: ${REGION}
+  VITE_APP_VERSION: ${VERSION}
+  VITE_APP_ENVIRONMENT: ${ENV}
+
+  # Rate Limiting
+  VITE_RATE_LIMIT_MAX_REQUESTS: "1000"
+  VITE_RATE_LIMIT_WINDOW_MS: "3600000"
+
+  # Error Tracking
+  VITE_ERROR_TRACKING_ENABLED: "true"
+  VITE_ERROR_TRACKING_SAMPLE_RATE: "100"
+
+  # User Journey Tracking
+  VITE_USER_JOURNEY_TRACKING_ENABLED: "true"
+  VITE_USER_JOURNEY_SESSION_TIMEOUT: "30"
+
+  # Web Vitals
+  VITE_ENABLE_WEB_VITALS: "true"
+  VITE_WEB_VITALS_SAMPLE_RATE: "100"
