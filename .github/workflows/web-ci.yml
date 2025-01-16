@@ -1,0 +1,162 @@
+name: Web CI
+
+on:
+  push:
+    paths:
+      - 'src/web/**'
+  pull_request:
+    paths:
+      - 'src/web/**'
+
+env:
+  WORKING_DIRECTORY: src/web
+  NODE_VERSION: '20.x'
+  COVERAGE_THRESHOLD: '80'
+  TIMEOUT_MINUTES: '30'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ env.TIMEOUT_MINUTES }}
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate ESLint config
+        run: npx eslint --print-config .eslintrc.json
+
+      - name: Run ESLint
+        run: npm run lint
+        
+      - name: Run TypeScript type check
+        run: npm run typecheck
+
+      - name: Upload lint results
+        uses: actions/upload-artifact@v3
+        with:
+          name: lint-report
+          path: ${{ env.WORKING_DIRECTORY }}/lint-results
+          retention-days: 5
+
+  build:
+    name: Build Application
+    needs: [lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ env.TIMEOUT_MINUTES }}
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate package.json
+        run: npm audit
+
+      - name: Build application
+        run: npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-output
+          path: ${{ env.WORKING_DIRECTORY }}/dist
+          retention-days: 5
+
+  test:
+    name: Run Tests
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ env.TIMEOUT_MINUTES }}
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm run test:coverage
+        env:
+          CI: true
+
+      - name: Verify coverage meets threshold
+        run: |
+          COVERAGE_RESULT=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
+          if (( $(echo "$COVERAGE_RESULT < ${{ env.COVERAGE_THRESHOLD }}" | bc -l) )); then
+            echo "Test coverage ($COVERAGE_RESULT%) is below threshold (${{ env.COVERAGE_THRESHOLD }}%)"
+            exit 1
+          fi
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: ${{ env.WORKING_DIRECTORY }}/coverage
+          retention-days: 5
+
+      - name: Generate test summary
+        run: |
+          echo "### Test Results :test_tube:" >> $GITHUB_STEP_SUMMARY
+          echo "- Coverage: $(cat coverage/coverage-summary.json | jq '.total.lines.pct')%" >> $GITHUB_STEP_SUMMARY
+          echo "- Total Tests: $(cat coverage/coverage-summary.json | jq '.total.lines.total')" >> $GITHUB_STEP_SUMMARY
+
+  ci-status:
+    name: CI Status Check
+    needs: [lint, build, test]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check workflow status
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+
+      - name: Set success status
+        run: echo "CI workflow completed successfully"
+
+outputs:
+  success: ${{ jobs.ci-status.result == 'success' }}
+  summary: ${{ toJSON(jobs.test.steps.*.outputs) }}
