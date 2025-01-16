@@ -1,0 +1,36 @@
+* @global-maintainers
+
+# Backend services ownership
+/src/backend/ @backend-team @backend-leads
+
+# Security-specific modules
+/src/backend/src/security/ @security-team @backend-leads
+
+# Analytics service ownership
+/src/backend/src/analytics-service/ @analytics-team @backend-leads
+
+# Prompt service ownership
+/src/backend/src/prompt-service/ @prompt-team @backend-leads
+
+# Web frontend ownership
+/src/web/ @frontend-team @frontend-leads
+
+# Infrastructure and deployment configuration
+/infrastructure/ @devops-team @infrastructure-leads
+
+# CI/CD workflow configurations
+/.github/workflows/ @devops-team @ci-leads
+
+# Test ownership
+/src/backend/tests/ @qa-team @backend-leads
+/src/web/tests/ @qa-team @frontend-leads
+
+# Documentation ownership
+*.md @docs-team
+
+# Package dependency management
+package.json @dependency-managers @security-team
+package-lock.json @dependency-managers @security-team
+
+# License and legal documents
+LICENSE @legal-team
