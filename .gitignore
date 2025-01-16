@@ -1,0 +1,119 @@
+# Dependencies
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+poetry.lock
+pip-log.txt
+.pytest_cache/
+
+# Build Output
+dist/
+build/
+.next/
+out/
+.nuxt/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+.env.ci
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+.ssh/
+
+# IDE & Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+*.sublime-workspace
+*.sublime-project
+.project
+.settings/
+.classpath
+
+# Testing & Coverage
+coverage/
+.nyc_output/
+junit.xml
+test-report.xml
+.coverage
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pip-log.txt
+pip-delete-this-directory.txt
+*.stackdump
+
+# Cache
+.cache/
+.npm/
+.eslintcache
+.stylelintcache
+*.tsbuildinfo
+.pytest_cache/
+__pycache__/
+.mypy_cache/
+
+# Temporary Files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.swp
+*.orig
+*~
+
+# Docker
+.docker/
+*.dockerfile
+docker-compose.override.yml
+.dockerignore
+docker-compose.override.yaml
+
+# Cloud & Infrastructure
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraformrc
+terraform.rc
+.azure/
+.gcloud/
+*.tfvars
+
+# Security & Scanning
+security-report/
+*.scan
+*.secret
+*.key.bak
+*.pwd
+*.password
+*.token
+*.credential
