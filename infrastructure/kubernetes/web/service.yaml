@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+  namespace: prompts-portal
+  labels:
+    app: prompts-portal
+    tier: frontend
+    component: web
+  annotations:
+    # Prometheus monitoring integration
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "80"
+    prometheus.io/path: "/metrics"
+    # Azure-specific load balancer configuration
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    # Health check configuration
+    health.monitor/enabled: "true"
+    health.monitor/path: "/health"
+    health.monitor/port: "80"
+    # Additional monitoring endpoints
+    monitoring.endpoints/readiness: "/ready"
+    monitoring.endpoints/liveness: "/health"
+    monitoring.endpoints/startup: "/startup"
+    # TLS configuration
+    service.beta.kubernetes.io/tls-min-version: "VersionTLS12"
+    service.beta.kubernetes.io/tls-cipher-suites: "TLS_AES_128_GCM_SHA256,TLS_AES_256_GCM_SHA384"
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+    - name: https
+      port: 443
+      targetPort: 443
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app: prompts-portal
+    tier: frontend
+    component: web
+  sessionAffinity: None
+  publishNotReadyAddresses: false
+  # Health check configuration
+  healthCheckNodePort: 80
+  # Load balancing configuration
+  externalTrafficPolicy: Local
+  # Security configuration
+  internalTrafficPolicy: Cluster
