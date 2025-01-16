@@ -1,0 +1,209 @@
+name: Web CD
+
+on:
+  workflow_run:
+    workflows: ["Web CI"]
+    types:
+      - completed
+    branches: [main]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  WORKING_DIRECTORY: src/web
+  DOCKER_REGISTRY: ghcr.io
+  IMAGE_NAME: prompts-portal/web
+  CACHE_KEY: docker-build-cache
+  SCAN_SEVERITY: HIGH,CRITICAL
+  NODE_VERSION: '20.x'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      scan_results: ${{ steps.scan.outputs.sarif }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          buildkitd-flags: --debug
+          driver-opts: |
+            image=moby/buildkit:v0.12.0
+            network=host
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.DOCKER_REGISTRY_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+
+      - name: Scan base image
+        uses: aquasecurity/trivy-action@v0.10.0
+        with:
+          image-ref: 'node:20-alpine'
+          format: 'sarif'
+          output: 'trivy-base-results.sarif'
+          severity: ${{ env.SCAN_SEVERITY }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v3
+        with:
+          context: ${{ env.WORKING_DIRECTORY }}
+          file: ${{ env.WORKING_DIRECTORY }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ env.CACHE_KEY }}
+          cache-to: type=gha,mode=max,scope=${{ env.CACHE_KEY }}
+          build-args: |
+            API_BASE_URL=${{ secrets.API_BASE_URL }}
+            BUILD_VERSION=${{ github.sha }}
+          provenance: false
+          sbom: true
+
+      - name: Scan built image
+        id: scan
+        uses: aquasecurity/trivy-action@v0.10.0
+        with:
+          image-ref: ${{ steps.meta.outputs.tags }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: ${{ env.SCAN_SEVERITY }}
+
+      - name: Upload scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: container-security
+
+  deploy-development:
+    name: Deploy to Development
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment:
+      name: development
+      url: https://dev.promptsportal.com
+    
+    steps:
+      - name: Configure Kubernetes
+        uses: azure/k8s-set-context@v3
+        with:
+          kubeconfig: ${{ secrets.KUBECONFIG_DEV }}
+          
+      - name: Deploy to development
+        uses: azure/k8s-deploy@v4
+        with:
+          namespace: development
+          manifests: |
+            infrastructure/kubernetes/web/deployment.yaml
+          images: |
+            ${{ needs.build-and-push.outputs.image_tag }}
+          strategy: canary
+          percentage: 20
+          timeout: 5m
+
+      - name: Verify deployment health
+        run: |
+          kubectl rollout status deployment/web-frontend -n development
+          kubectl get deployment web-frontend -n development -o json | jq .status.conditions
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: deploy-development
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.promptsportal.com
+
+    steps:
+      - name: Configure Kubernetes
+        uses: azure/k8s-set-context@v3
+        with:
+          kubeconfig: ${{ secrets.KUBECONFIG_STAGING }}
+
+      - name: Deploy to staging
+        uses: azure/k8s-deploy@v4
+        with:
+          namespace: staging
+          manifests: |
+            infrastructure/kubernetes/web/deployment.yaml
+          images: |
+            ${{ needs.build-and-push.outputs.image_tag }}
+          strategy: blue-green
+          timeout: 10m
+
+      - name: Run health checks
+        run: |
+          for i in {1..5}; do
+            curl -f https://staging.promptsportal.com/health || exit 1
+            sleep 30
+          done
+
+  deploy-production:
+    name: Deploy to Production
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://promptsportal.com
+
+    steps:
+      - name: Configure Kubernetes
+        uses: azure/k8s-set-context@v3
+        with:
+          kubeconfig: ${{ secrets.KUBECONFIG_PROD }}
+
+      - name: Deploy to production
+        uses: azure/k8s-deploy@v4
+        with:
+          namespace: production
+          manifests: |
+            infrastructure/kubernetes/web/deployment.yaml
+          images: |
+            ${{ needs.build-and-push.outputs.image_tag }}
+          strategy: canary
+          percentage: 10
+          timeout: 15m
+          
+      - name: Monitor deployment
+        run: |
+          kubectl rollout status deployment/web-frontend -n production
+          kubectl get deployment web-frontend -n production -o json | jq .status.conditions
+
+      - name: Update status page
+        if: success()
+        run: |
+          curl -X POST ${{ secrets.STATUS_PAGE_URL }} \
+            -H "Authorization: Bearer ${{ secrets.STATUS_PAGE_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"component": "web-frontend", "status": "operational"}'
