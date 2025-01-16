@@ -1,0 +1,208 @@
+---
+# ServiceAccount for AlertManager with minimal required permissions
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app: alertmanager
+    component: monitoring
+
+---
+# ConfigMap containing AlertManager configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+  labels:
+    app: alertmanager
+    component: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: ${SLACK_API_URL}
+      smtp_smarthost: smtp.promptsportal.com:587
+      smtp_from: alertmanager@promptsportal.com
+      smtp_auth_username: ${SMTP_USER}
+      smtp_auth_password: ${SMTP_PASSWORD}
+
+    route:
+      group_by: ['alertname', 'cluster', 'service', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: default-receiver
+      routes:
+        - match:
+            severity: critical
+          receiver: critical-alerts
+          repeat_interval: 1h
+          continue: true
+        - match:
+            severity: warning
+          receiver: warning-alerts
+          repeat_interval: 2h
+
+    inhibit_rules:
+      - source_match:
+          severity: critical
+        target_match:
+          severity: warning
+        equal: ['alertname', 'cluster', 'service']
+
+    receivers:
+      - name: default-receiver
+        slack_configs:
+          - channel: '#monitoring'
+            title: '{{ .GroupLabels.alertname }}'
+            text: '{{ .CommonAnnotations.description }}'
+            send_resolved: true
+
+      - name: critical-alerts
+        slack_configs:
+          - channel: '#critical-alerts'
+            title: '[CRITICAL] {{ .GroupLabels.alertname }}'
+            text: '{{ .CommonAnnotations.description }}
+                   {{ .CommonAnnotations.runbook_url }}'
+            send_resolved: true
+        email_configs:
+          - to: oncall@promptsportal.com
+            send_resolved: true
+            html: '{{ template "email.default.html" . }}'
+        pagerduty_configs:
+          - service_key: ${PAGERDUTY_KEY}
+            description: '{{ .CommonAnnotations.description }}'
+            severity: '{{ .CommonLabels.severity }}'
+
+      - name: warning-alerts
+        slack_configs:
+          - channel: '#warning-alerts'
+            title: '[WARNING] {{ .GroupLabels.alertname }}'
+            text: '{{ .CommonAnnotations.description }}'
+            send_resolved: true
+
+---
+# StatefulSet for highly available AlertManager deployment
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app: alertmanager
+    component: monitoring
+spec:
+  replicas: 2
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  serviceName: alertmanager
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+        component: monitoring
+    spec:
+      serviceAccountName: alertmanager
+      securityContext:
+        fsGroup: 2000
+        runAsNonRoot: true
+        runAsUser: 1000
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app: alertmanager
+      containers:
+        - name: alertmanager
+          image: quay.io/prometheus/alertmanager:v0.25.0
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --data.retention=120h
+            - --cluster.listen-address=0.0.0.0:9094
+            - --web.listen-address=0.0.0.0:9093
+            - --web.route-prefix=/
+            - --cluster.advertise-address=$(POD_IP):9094
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - containerPort: 9093
+              protocol: TCP
+              name: web
+            - containerPort: 9094
+              protocol: TCP
+              name: cluster
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9093
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9093
+            initialDelaySeconds: 15
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+            - name: data
+              mountPath: /alertmanager
+      volumes:
+        - name: config
+          configMap:
+            name: alertmanager-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+        storageClassName: standard
+
+---
+# Service for exposing AlertManager
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app: alertmanager
+    component: monitoring
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9093
+      targetPort: 9093
+      protocol: TCP
+      name: web
+    - port: 9094
+      targetPort: 9094
+      protocol: TCP
+      name: cluster
+  selector:
+    app: alertmanager
