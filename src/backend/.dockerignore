@@ -1,0 +1,43 @@
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Version Control
+.git
+.gitignore
+.github
+
+# Environment and Configuration
+.env
+.env.*
+.vscode
+.idea
+nodemon.json
+tsconfig.json
+.eslintrc*
+.prettierrc*
+
+# Build and Test
+dist
+coverage
+tests
+*.test.ts
+*.spec.ts
+jest.config.ts
+
+# Documentation
+*.md
+docs
+CHANGELOG.md
+
+# Logs
+*.log
+
+# Development Tools
+.husky
+
+# Keep production config files
+!.env.example
+!.dockerignore
+!Dockerfile
