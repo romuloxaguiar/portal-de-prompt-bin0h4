@@ -1,0 +1,36 @@
+{
+  "watch": [
+    "src/api-gateway/**/*",
+    "src/analytics-service/**/*",
+    "src/collaboration-service/**/*", 
+    "src/prompt-service/**/*",
+    "src/shared/**/*"
+  ],
+  "ext": ".ts,.js,.json",
+  "ignore": [
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts", 
+    "src/**/__tests__/**",
+    "src/**/__mocks__/**",
+    "src/**/dist/**",
+    "src/**/node_modules/**"
+  ],
+  "exec": "ts-node -r tsconfig-paths/register --project ./tsconfig.json src/api-gateway/server.ts",
+  "env": {
+    "NODE_ENV": "development",
+    "TS_NODE_PROJECT": "./tsconfig.json",
+    "DEBUG": "app:*",
+    "PORT": "3000",
+    "HOST": "localhost"
+  },
+  "verbose": true,
+  "restartable": "rs",
+  "delay": 1000,
+  "events": {
+    "start": "echo 'App started'",
+    "restart": "echo 'App restarted'",
+    "crash": "echo 'App crashed - waiting for changes before restart'"
+  },
+  "legacyWatch": false,
+  "polling": false
+}
